@@ -1,2 +1,4 @@
-# One channel per line: display link|numeric Telegram chat ID
-# https://t.me/example|-1001234567890
+https://t.me/+hMczBoRxm4A5MzM6|-1002028457663
+https://t.me/+rjxO66ez8iI2ODMy|-1001908825465
+https://t.me/+_E7NJunFDZpjOTc0|-1001884104173
+https://t.me/+ZQ3vwfxC9QViZjJi|-1002665474300
