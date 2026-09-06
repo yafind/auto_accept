@@ -1,0 +1,2 @@
+# One channel per line: display link|numeric Telegram chat ID
+# https://t.me/example|-1001234567890

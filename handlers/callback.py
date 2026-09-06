@@ -1,0 +1,45 @@
+from datetime import timedelta
+import logging
+
+from aiogram import Bot, Router
+from aiogram.types import CallbackQuery
+
+from database import Database, parse_datetime, utc_now
+from services.approval import approve_with_retry, notify_admin
+
+
+router = Router()
+
+
+@router.callback_query(lambda query: query.data and query.data.startswith("approve:"))
+async def approve_request(query: CallbackQuery, bot: Bot, database: Database, messages: dict[str, str], admin_id: int, logger: logging.Logger) -> None:
+    application_id = int(query.data.split(":", 1)[1])
+    application = await database.get_application(application_id)
+    if not application:
+        await query.answer(messages["already_processed"], show_alert=True)
+        return
+    if query.from_user.id != application["user_id"]:
+        await database.log("foreign_button_click", query.from_user.id, application["channel_id"], str(application_id))
+        await notify_admin(bot, admin_id, f"🚫 Попытка обойти капчу\n👤 ID: {query.from_user.id}\n📋 Заявка: {application_id}")
+        await query.answer(messages["foreign_click"], show_alert=True)
+        return
+    if application["status"] != "pending" or utc_now() >= parse_datetime(application["expires_at"]):
+        await query.answer(messages["already_processed"], show_alert=True)
+        return
+    if utc_now() - parse_datetime(application["created_at"]) < timedelta(seconds=3):
+        await query.answer(messages["too_early"], show_alert=True)
+        return
+
+    try:
+        await approve_with_retry(bot, application["channel_id"], application["user_id"])
+        if await database.approve_application(application_id):
+            await database.log("application_approved", application["user_id"], application["channel_id"], str(application_id))
+            await query.message.edit_reply_markup(reply_markup=None)
+            await query.message.answer(messages["approved"])
+            await notify_admin(bot, admin_id, f"✅ Заявка одобрена\n👤 ID: {application['user_id']}\n📢 Канал: {application['channel_id']}")
+        await query.answer()
+    except Exception as exc:
+        logger.exception("approval failed: %s", exc)
+        await database.log("approval_error", application["user_id"], application["channel_id"], str(exc))
+        await notify_admin(bot, admin_id, f"❌ Ошибка одобрения\n📋 Заявка: {application_id}\n{exc}")
+        await query.answer("Не удалось обработать заявку. Попробуйте позже.", show_alert=True)

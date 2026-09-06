@@ -1,0 +1,14 @@
+[Unit]
+Description=Telegram Auto Accept Bot
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/auto_accept
+ExecStart=/opt/auto_accept/.venv/bin/python /opt/auto_accept/main.py
+Restart=always
+RestartSec=10
+EnvironmentFile=/opt/auto_accept/.env
+
+[Install]
+WantedBy=multi-user.target
