@@ -70,7 +70,6 @@ async def approve_request(query: CallbackQuery, bot: Bot, database: Database, me
                 )
 
             await query.message.edit_reply_markup(reply_markup=None)
-            await query.message.answer(messages["approved"])
             try:
                 notification_note = "" if applicant_notified else "\n⚠️ Уведомление пользователю не доставлено"
                 await notify_admin(
@@ -86,7 +85,7 @@ async def approve_request(query: CallbackQuery, bot: Bot, database: Database, me
                     application["channel_id"],
                     str(exc),
                 )
-        await query.answer()
+                await query.answer(messages["approved"])
     except Exception as exc:
         await database.release_application(application_id)
         logger.exception("approval failed: %s", exc)
