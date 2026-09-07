@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS applications (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
     channel_id INTEGER NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'declined', 'expired')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, approved_at TIMESTAMP,
-    declined_at TIMESTAMP, expires_at TIMESTAMP,
+    declined_at TIMESTAMP, expires_at TIMESTAMP, processing_at TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(user_id), FOREIGN KEY (channel_id) REFERENCES channels(channel_id)
 );
 CREATE TABLE IF NOT EXISTS logs (
@@ -50,6 +50,10 @@ class Database:
         self.connection = await aiosqlite.connect(self.path)
         self.connection.row_factory = aiosqlite.Row
         await self.connection.executescript(SCHEMA)
+        try:
+            await self.connection.execute("ALTER TABLE applications ADD COLUMN processing_at TIMESTAMP")
+        except aiosqlite.OperationalError:
+            pass
         await self.connection.commit()
 
     async def close(self) -> None:
@@ -80,6 +84,15 @@ class Database:
         )
 
     async def sync_channels(self, channels: list[Any]) -> None:
+        channel_ids = [channel.channel_id for channel in channels]
+        if channel_ids:
+            placeholders = ",".join("?" for _ in channel_ids)
+            await self.execute(
+                f"UPDATE channels SET is_active=0 WHERE channel_id NOT IN ({placeholders})",
+                tuple(channel_ids),
+            )
+        else:
+            await self.execute("UPDATE channels SET is_active=0")
         for channel in channels:
             await self.execute(
                 "INSERT INTO channels(channel_id, username, link) VALUES(?, ?, ?) "
@@ -105,23 +118,48 @@ class Database:
     async def get_application(self, application_id: int) -> aiosqlite.Row | None:
         return await self.fetchone("SELECT * FROM applications WHERE id=?", (application_id,))
 
+    async def get_pending_application(self, user_id: int, channel_id: int) -> aiosqlite.Row | None:
+        return await self.fetchone(
+            "SELECT * FROM applications WHERE user_id=? AND channel_id=? AND status='pending' ORDER BY id DESC LIMIT 1",
+            (user_id, channel_id),
+        )
+
+    async def claim_application(self, application_id: int, timeout_seconds: int = 120) -> bool:
+        stale_before = utc_now().timestamp() - timeout_seconds
+        stale_datetime = datetime.fromtimestamp(stale_before, timezone.utc).replace(tzinfo=None)
+        cursor = await self.execute(
+            "UPDATE applications SET processing_at=? "
+            "WHERE id=? AND status='pending' AND (processing_at IS NULL OR processing_at < ?)",
+            (utc_now(), application_id, stale_datetime),
+        )
+        return cursor.rowcount == 1
+
+    async def release_application(self, application_id: int) -> None:
+        await self.execute(
+            "UPDATE applications SET processing_at=NULL WHERE id=? AND status='pending'",
+            (application_id,),
+        )
+
     async def approve_application(self, application_id: int) -> bool:
         cursor = await self.execute(
-            "UPDATE applications SET status='approved', approved_at=? WHERE id=? AND status='pending'",
+            "UPDATE applications SET status='approved', approved_at=?, processing_at=NULL "
+            "WHERE id=? AND status='pending' AND processing_at IS NOT NULL",
             (utc_now(), application_id),
         )
         return cursor.rowcount == 1
 
     async def expire_application(self, application_id: int) -> bool:
         cursor = await self.execute(
-            "UPDATE applications SET status='expired', declined_at=? WHERE id=? AND status='pending'",
+            "UPDATE applications SET status='expired', declined_at=?, processing_at=NULL "
+            "WHERE id=? AND status='pending' AND processing_at IS NOT NULL",
             (utc_now(), application_id),
         )
         return cursor.rowcount == 1
 
     async def pending_expired(self) -> list[aiosqlite.Row]:
         return await self.fetchall(
-            "SELECT * FROM applications WHERE status='pending' AND expires_at < ?", (utc_now(),)
+            "SELECT * FROM applications WHERE status='pending' AND processing_at IS NULL AND expires_at < ?",
+            (utc_now(),),
         )
 
     async def log(self, event_type: str, user_id: int | None = None, channel_id: int | None = None, details: str = "") -> None:

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import datetime, timedelta
 
 from aiogram import Bot
@@ -25,7 +26,13 @@ async def send_digest(bot: Bot, database: Database, admin_id: int) -> None:
     await bot.send_message(admin_id, build_digest(await database.stats(date), date))
 
 
-async def digest_loop(bot: Bot, database: Database, admin_id: int, digest_time: str) -> None:
+async def digest_loop(bot: Bot, database: Database, admin_id: int, digest_time: str, logger: logging.Logger) -> None:
     while True:
-        await asyncio.sleep(seconds_until(digest_time))
-        await send_digest(bot, database, admin_id)
+        try:
+            await asyncio.sleep(seconds_until(digest_time))
+            await send_digest(bot, database, admin_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("digest loop failed")
+            await asyncio.sleep(60)

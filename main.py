@@ -30,7 +30,7 @@ async def main() -> None:
     background_tasks = [
         asyncio.create_task(expiration_loop(bot, database, settings.admin_id, messages, logger)),
         asyncio.create_task(heartbeat_loop(bot, settings.admin_id, settings.heartbeat_interval, logger)),
-        asyncio.create_task(digest_loop(bot, database, settings.admin_id, settings.digest_time)),
+        asyncio.create_task(digest_loop(bot, database, settings.admin_id, settings.digest_time, logger)),
     ]
     try:
         await dispatcher.start_polling(

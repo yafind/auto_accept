@@ -30,7 +30,8 @@ async def handle_chat_join_request(
         return
 
     expires_at = utc_now() + timedelta(minutes=10)
-    application_id = await database.create_application(user.id, channel_id, expires_at)
+    existing_application = await database.get_pending_application(user.id, channel_id)
+    application_id = existing_application["id"] if existing_application else await database.create_application(user.id, channel_id, expires_at)
     channel_name = request.chat.username and f"@{request.chat.username}" or request.chat.title
     
     try:

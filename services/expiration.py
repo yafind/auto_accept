@@ -10,7 +10,18 @@ from services.approval import notify_admin
 
 async def expiration_loop(bot: Bot, database: Database, admin_id: int, messages: dict[str, str], logger: logging.Logger) -> None:
     while True:
-        for application in await database.pending_expired():
+        try:
+            applications = await database.pending_expired()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("failed to load expired applications")
+            await asyncio.sleep(30)
+            continue
+
+        for application in applications:
+            if not await database.claim_application(application["id"]):
+                continue
             try:
                 await bot.decline_chat_join_request(application["channel_id"], application["user_id"])
                 
@@ -48,6 +59,7 @@ async def expiration_loop(bot: Bot, database: Database, admin_id: int, messages:
                 await database.expire_application(application["id"])
                 
             except Exception as exc:
+                await database.release_application(application["id"])
                 logger.exception("expiration failed: %s", exc)
                 
         await asyncio.sleep(30)
