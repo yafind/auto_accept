@@ -41,6 +41,7 @@ async def approve_request(query: CallbackQuery, bot: Bot, database: Database, me
     try:
         await approve_with_retry(bot, application["channel_id"], application["user_id"])
         if await database.approve_application(application_id):
+            await database.mark_confirmed(application["user_id"])
             await database.log("application_approved", application["user_id"], application["channel_id"], str(application_id))
             applicant_notified = True
 

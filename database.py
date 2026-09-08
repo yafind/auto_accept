@@ -10,7 +10,7 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT,
     is_banned BOOLEAN DEFAULT 0, first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_request_at TIMESTAMP
+    last_request_at TIMESTAMP, confirmed_at TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS channels (
     channel_id INTEGER PRIMARY KEY, username TEXT, link TEXT,
@@ -52,6 +52,10 @@ class Database:
         await self.connection.executescript(SCHEMA)
         try:
             await self.connection.execute("ALTER TABLE applications ADD COLUMN processing_at TIMESTAMP")
+        except aiosqlite.OperationalError:
+            pass
+        try:
+            await self.connection.execute("ALTER TABLE users ADD COLUMN confirmed_at TIMESTAMP")
         except aiosqlite.OperationalError:
             pass
         await self.connection.commit()
@@ -103,6 +107,16 @@ class Database:
     async def is_banned(self, user_id: int) -> bool:
         row = await self.fetchone("SELECT is_banned FROM users WHERE user_id=?", (user_id,))
         return bool(row and row["is_banned"])
+
+    async def is_confirmed(self, user_id: int) -> bool:
+        row = await self.fetchone("SELECT confirmed_at FROM users WHERE user_id=?", (user_id,))
+        return bool(row and row["confirmed_at"])
+
+    async def mark_confirmed(self, user_id: int) -> None:
+        await self.execute(
+            "UPDATE users SET confirmed_at=COALESCE(confirmed_at, ?) WHERE user_id=?",
+            (utc_now(), user_id),
+        )
 
     async def is_channel_active(self, channel_id: int) -> bool:
         row = await self.fetchone("SELECT is_active FROM channels WHERE channel_id=?", (channel_id,))

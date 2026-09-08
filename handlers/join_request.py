@@ -7,6 +7,7 @@ from aiogram.exceptions import TelegramForbiddenError
 
 from database import Database, utc_now
 from keyboards import confirmation_keyboard
+from services.approval import approve_with_retry
 
 router = Router()
 
@@ -27,6 +28,22 @@ async def handle_chat_join_request(
     if await database.is_banned(user.id) or not await database.is_channel_active(channel_id):
         await bot.decline_chat_join_request(channel_id, user.id)
         await database.log("application_declined", user.id, channel_id, "banned_or_inactive")
+        return
+
+    if await database.is_confirmed(user.id):
+        try:
+            await approve_with_retry(bot, channel_id, user.id)
+            await database.log("application_auto_approved", user.id, channel_id, "already_confirmed")
+            try:
+                await bot.send_message(user.id, messages["approved"])
+            except TelegramForbiddenError:
+                logger.warning("automatic approval notification unavailable: user=%s channel=%s", user.id, channel_id)
+            except Exception as exc:
+                logger.exception("automatic approval notification failed: user=%s channel=%s", user.id, channel_id)
+                await database.log("application_notification_failed", user.id, channel_id, str(exc))
+        except Exception as exc:
+            logger.exception("automatic approval failed: user=%s channel=%s", user.id, channel_id)
+            await database.log("approval_error", user.id, channel_id, str(exc))
         return
 
     expires_at = utc_now() + timedelta(minutes=10)
